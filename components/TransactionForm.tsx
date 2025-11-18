@@ -16,6 +16,8 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, onAddOrUpdat
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [description, setDescription] = useState('');
+
+  const isSavingsRelated = category === 'Savings Contribution' || category === 'Savings Withdrawal' || !!existingTransaction?.goal_id;
   
   useEffect(() => {
     if (existingTransaction) {
@@ -26,6 +28,13 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, onAddOrUpdat
       setDescription(existingTransaction.description);
     }
   }, [existingTransaction]);
+
+  useEffect(() => {
+    // For new transactions, clear description if user selects a savings category
+    if (isSavingsRelated && !existingTransaction) {
+        setDescription('');
+    }
+  }, [isSavingsRelated, existingTransaction]);
 
   const handleTypeChange = (newType: TransactionType) => {
     setType(newType);
@@ -56,9 +65,9 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, onAddOrUpdat
       date: finalDateIsoString,
       description,
       // Retain existing savings meta if editing
-      goalId: existingTransaction?.goalId,
-      savingsMeta: existingTransaction?.savingsMeta,
-      isValid: existingTransaction?.isValid,
+      goal_id: existingTransaction?.goal_id,
+      savings_meta: existingTransaction?.savings_meta,
+      is_valid: existingTransaction?.is_valid,
     };
 
     if (category === 'Savings Contribution' && !existingTransaction) { // Can't change a non-saving into a saving transaction via edit
@@ -113,7 +122,7 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, onAddOrUpdat
               value={category}
               onChange={(e) => setCategory(e.target.value)}
               className="w-full mt-1 p-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              disabled={!!existingTransaction?.goalId} // Don't allow changing category of savings transactions
+              disabled={!!existingTransaction?.goal_id} // Don't allow changing category of savings transactions
             >
               {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
             </select>
@@ -134,7 +143,9 @@ const TransactionForm: React.FC<TransactionFormProps> = ({ onClose, onAddOrUpdat
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full mt-1 p-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              className="w-full mt-1 p-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-900 disabled:text-gray-400 disabled:cursor-not-allowed"
+              disabled={isSavingsRelated}
+              placeholder={isSavingsRelated ? 'Auto-generated for savings quests' : ''}
             />
           </div>
           <div className="flex justify-end gap-4 pt-4">

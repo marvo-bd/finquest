@@ -59,6 +59,3 @@ export const SECURITY_QUESTIONS = [
   "What is your favorite book?",
   "What was the model of your first car?",
 ];
-
-
-export const DEFAULT_SAVINGS_GOAL_ID = 'default-savings-goal';

@@ -1,16 +1,16 @@
 import React, { useState } from 'react';
 import { SavingsGoal, Transaction, TransactionType } from '../types';
 import { Plus } from 'lucide-react';
-import { DEFAULT_SAVINGS_GOAL_ID } from '../constants';
 
 interface AssignSavingsGoalModalProps {
     isOpen: boolean;
     onClose: () => void;
-    pendingTransaction: Omit<Transaction, 'id' | 'goalId'>;
+    pendingTransaction: Omit<Transaction, 'id' | 'goal_id'>;
     goals: SavingsGoal[];
-    onUpdateGoals: (goals: SavingsGoal[]) => void;
-    transactions: Transaction[];
-    onUpdateTransactions: (transactions: Transaction[]) => void;
+    onSetSavingsGoals: React.Dispatch<React.SetStateAction<SavingsGoal[]>>;
+    onUpsertSavingsGoals: (goals: SavingsGoal[]) => void;
+    onSetTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
+    onUpsertTransactions: (transactions: Transaction[]) => void;
     currencySymbol: string;
     triggerFinCheer: () => void;
 }
@@ -22,9 +22,10 @@ const AssignSavingsGoalModal: React.FC<AssignSavingsGoalModalProps> = ({
     onClose,
     pendingTransaction,
     goals,
-    onUpdateGoals,
-    transactions,
-    onUpdateTransactions,
+    onSetSavingsGoals,
+    onUpsertSavingsGoals,
+    onSetTransactions,
+    onUpsertTransactions,
     currencySymbol,
     triggerFinCheer
 }) => {
@@ -32,16 +33,17 @@ const AssignSavingsGoalModal: React.FC<AssignSavingsGoalModalProps> = ({
     const [goalName, setGoalName] = useState('');
     const [targetAmount, setTargetAmount] = useState('');
     const [selectedEmoji, setSelectedEmoji] = useState(EMOJI_OPTIONS[0]);
+    const [error, setError] = useState('');
 
     if (!isOpen) return null;
 
     const handleGoalSelection = (goal: SavingsGoal) => {
         const amount = pendingTransaction.amount;
-        const generalGoal = goals.find(g => g.id === DEFAULT_SAVINGS_GOAL_ID);
+        const generalGoal = goals.find(g => g.is_deletable === false);
 
         // Handle over-contribution by splitting the transaction
-        if (goal.isDeletable !== false && (goal.currentAmount + amount) > goal.targetAmount) {
-            const amountToComplete = goal.targetAmount - goal.currentAmount;
+        if (goal.is_deletable !== false && (goal.current_amount + amount) > goal.target_amount) {
+            const amountToComplete = goal.target_amount - goal.current_amount;
             const spilloverAmount = amount - amountToComplete;
             
             const transactionsToAdd: Transaction[] = [];
@@ -52,11 +54,11 @@ const AssignSavingsGoalModal: React.FC<AssignSavingsGoalModalProps> = ({
                     id: crypto.randomUUID(),
                     amount: amountToComplete,
                     description: `Final contribution to complete: "${goal.name}"`,
-                    goalId: goal.id,
-                    isValid: true,
-                    savingsMeta: {
-                        previousAmount: goal.currentAmount,
-                        currentAmount: goal.targetAmount,
+                    goal_id: goal.id,
+                    is_valid: true,
+                    savings_meta: {
+                        previousAmount: goal.current_amount,
+                        currentAmount: goal.target_amount,
                     },
                 });
             }
@@ -67,30 +69,39 @@ const AssignSavingsGoalModal: React.FC<AssignSavingsGoalModalProps> = ({
                     id: crypto.randomUUID(),
                     amount: spilloverAmount,
                     description: `Spillover from "${goal.name}" to General Savings`,
-                    goalId: generalGoal.id,
-                    isValid: true,
-                    savingsMeta: {
-                        previousAmount: generalGoal.currentAmount,
-                        currentAmount: generalGoal.currentAmount + spilloverAmount,
+                    goal_id: generalGoal.id,
+                    is_valid: true,
+                    savings_meta: {
+                        previousAmount: generalGoal.current_amount,
+                        currentAmount: generalGoal.current_amount + spilloverAmount,
                     },
                 });
             }
             
-            onUpdateTransactions([...transactions, ...transactionsToAdd]);
+            onSetTransactions(current => [...current, ...transactionsToAdd].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+            onUpsertTransactions(transactionsToAdd);
             
             const spilloverMessage = `Excess of ${currencySymbol}${spilloverAmount.toFixed(2)} transferred to General Savings.`;
             const generalGoalReceiptMessage = `Received ${currencySymbol}${spilloverAmount.toFixed(2)} spillover from "${goal.name}".`;
 
-            const updatedGoals = goals.map(g => {
-                if (g.id === goal.id) {
-                    return { ...g, unreadNotificationMessage: spilloverMessage };
-                }
-                if (spilloverAmount > 0.001 && g.id === generalGoal?.id) {
-                    return { ...g, unreadNotificationMessage: generalGoalReceiptMessage };
-                }
-                return g;
+            const goalsToUpsert: SavingsGoal[] = [];
+            onSetSavingsGoals(currentGoals => {
+                const updatedGoals = currentGoals.map(g => {
+                    if (g.id === goal.id) {
+                        const updated = { ...g, unread_notification_message: spilloverMessage };
+                        goalsToUpsert.push(updated);
+                        return updated;
+                    }
+                    if (spilloverAmount > 0.001 && g.id === generalGoal?.id) {
+                        const updated = { ...g, unread_notification_message: generalGoalReceiptMessage };
+                        goalsToUpsert.push(updated);
+                        return updated;
+                    }
+                    return g;
+                });
+                onUpsertSavingsGoals(goalsToUpsert);
+                return updatedGoals;
             });
-            onUpdateGoals(updatedGoals);
             triggerFinCheer();
 
         } else {
@@ -101,16 +112,17 @@ const AssignSavingsGoalModal: React.FC<AssignSavingsGoalModalProps> = ({
                 description: pendingTransaction.description 
                     ? `${pendingTransaction.description} (Goal: ${goal.name})`
                     : `Contribution to savings goal: "${goal.name}"`,
-                goalId: goal.id,
-                isValid: true,
-                savingsMeta: {
-                    previousAmount: goal.currentAmount,
-                    currentAmount: goal.currentAmount + amount,
+                goal_id: goal.id,
+                is_valid: true,
+                savings_meta: {
+                    previousAmount: goal.current_amount,
+                    currentAmount: goal.current_amount + amount,
                 },
             };
-            onUpdateTransactions([...transactions, newTransaction]);
+            onSetTransactions(current => [newTransaction, ...current].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+            onUpsertTransactions([newTransaction]);
             
-            if (goal.isDeletable !== false && goal.currentAmount < goal.targetAmount && (goal.currentAmount + pendingTransaction.amount) >= goal.targetAmount) {
+            if (goal.is_deletable !== false && goal.current_amount < goal.target_amount && (goal.current_amount + pendingTransaction.amount) >= goal.target_amount) {
                 triggerFinCheer();
             }
         }
@@ -120,34 +132,51 @@ const AssignSavingsGoalModal: React.FC<AssignSavingsGoalModalProps> = ({
 
     const handleCreateGoalSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!goalName || !targetAmount || !selectedEmoji) return;
+        setError('');
+        const trimmedGoalName = goalName.trim();
+        if (!trimmedGoalName || !targetAmount || !selectedEmoji) return;
+
+        const isDuplicate = goals.some(
+            (g) =>
+              !g.is_archived &&
+              g.name.trim().toLowerCase() === trimmedGoalName.toLowerCase()
+          );
+      
+          if (isDuplicate) {
+            setError('An active quest with this name already exists.');
+            return;
+          }
         
         const newGoal: SavingsGoal = {
             id: crypto.randomUUID(),
-            name: goalName,
-            targetAmount: parseFloat(targetAmount),
-            currentAmount: 0,
+            name: trimmedGoalName,
+            target_amount: parseFloat(targetAmount),
+            current_amount: 0,
             emoji: selectedEmoji,
-            createdAt: new Date().toISOString(),
-            isDeletable: true,
+            created_at: new Date().toISOString(),
+            is_deletable: true,
+            user_id: '', // Will be set in App.tsx
+            is_archived: false,
         };
-        onUpdateGoals([...goals, newGoal]);
+        onSetSavingsGoals(currentGoals => [...currentGoals, newGoal]);
+        onUpsertSavingsGoals([newGoal]);
 
         const amount = pendingTransaction.amount;
         const newTransaction: Transaction = {
              ...pendingTransaction,
             id: crypto.randomUUID(),
             description: `Initial contribution to new goal: "${newGoal.name}"`,
-            goalId: newGoal.id,
-            isValid: true,
-            savingsMeta: {
+            goal_id: newGoal.id,
+            is_valid: true,
+            savings_meta: {
                 previousAmount: 0, // It's a new goal
                 currentAmount: amount,
             },
         };
-        onUpdateTransactions([...transactions, newTransaction]);
+        onSetTransactions(current => [newTransaction, ...current].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+        onUpsertTransactions([newTransaction]);
 
-        if (pendingTransaction.amount >= newGoal.targetAmount) {
+        if (pendingTransaction.amount >= newGoal.target_amount) {
             triggerFinCheer();
         }
 
@@ -174,8 +203,8 @@ const AssignSavingsGoalModal: React.FC<AssignSavingsGoalModalProps> = ({
                                     <div className="flex-grow">
                                         <p className="font-semibold text-white">{goal.name}</p>
                                         <p className="text-xs text-gray-400">
-                                            {currencySymbol}{goal.currentAmount.toFixed(2)}
-                                            {goal.isDeletable !== false && ` / ${currencySymbol}${goal.targetAmount.toFixed(2)}`}
+                                            {currencySymbol}{goal.current_amount.toFixed(2)}
+                                            {goal.is_deletable !== false && ` / ${currencySymbol}${goal.target_amount.toFixed(2)}`}
                                         </p>
                                     </div>
                                 </button>
@@ -196,6 +225,7 @@ const AssignSavingsGoalModal: React.FC<AssignSavingsGoalModalProps> = ({
                             <div>
                                 <label className="block text-sm font-medium text-gray-400">Quest Name</label>
                                 <input type="text" value={goalName} onChange={(e) => setGoalName(e.target.value)} placeholder="e.g., Dream Vacation" required className="w-full mt-1 p-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:ring-2 focus:ring-indigo-500" />
+                                {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-400">Target Amount ({currencySymbol})</label>
@@ -216,6 +246,9 @@ const AssignSavingsGoalModal: React.FC<AssignSavingsGoalModalProps> = ({
                         </form>
                     </>
                 )}
+                 <div className="flex justify-end mt-6">
+                     <button type="button" onClick={onClose} className="py-2 px-4 bg-gray-600 hover:bg-gray-500 rounded-lg text-white font-semibold transition">Cancel</button>
+                </div>
             </div>
         </div>
     );

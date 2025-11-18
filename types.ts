@@ -4,9 +4,9 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  imageUrl: string;
-  isNewUser?: boolean;
-  hasCompletedTour?: boolean;
+  image_url: string;
+  is_new_user?: boolean;
+  has_completed_tour?: boolean;
   settings?: {
     currency: Currency;
     defaultDashboardView?: TimePeriod;
@@ -22,16 +22,17 @@ export enum TransactionType {
 }
 
 export interface Transaction {
-  id:string;
+  id: string;
+  user_id?: string;
   type: TransactionType;
   category: string;
   amount: number;
   date: string; // ISO string
   description: string;
-  goalId?: string;
-  isValid?: boolean;
-  invalidationReason?: string;
-  savingsMeta?: {
+  goal_id?: string;
+  is_valid?: boolean;
+  invalidation_reason?: string;
+  savings_meta?: {
     previousAmount: number;
     currentAmount: number;
   }
@@ -52,7 +53,6 @@ export interface ChartData {
 
 export interface BackupData {
   transactions: Transaction[];
-  habitCheckIns: string[];
   savingsGoals: SavingsGoal[];
   exportedAt: string;
   version: string;
@@ -60,12 +60,13 @@ export interface BackupData {
 
 export interface SavingsGoal {
   id: string;
+  user_id: string;
   name: string;
-  targetAmount: number;
-  currentAmount: number;
+  target_amount: number;
+  current_amount: number;
   emoji: string;
-  createdAt: string; // ISO string
-  isDeletable?: boolean;
-  unreadNotificationMessage?: string;
-  isArchived?: boolean;
+  created_at: string; // ISO string
+  is_deletable?: boolean;
+  unread_notification_message?: string | null;
+  is_archived?: boolean;
 }

@@ -1,4 +1,5 @@
 
+
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { User, Transaction, TransactionType, TimePeriod, ChartData, BackupData, SavingsGoal } from '../types';
@@ -21,22 +22,24 @@ import SetupPinModal from './SetupPinModal';
 import ResetPinModal from './ResetPinModal';
 import GoalLogModal from './GoalLogModal';
 import ConfirmationModal from './common/ConfirmationModal';
-import { PlusCircle, Download, BarChart2, PieChart as PieChartIcon, X, Trash2, Edit, CheckSquare, Square, ListChecks } from 'lucide-react';
+import { PlusCircle, Download, BarChart2, PieChart as PieChartIcon, X, Trash2, Edit, CheckSquare, Square, ListChecks, Filter } from 'lucide-react';
 import WithdrawFromGoalModal from './WithdrawFromGoalModal';
 
 
 interface DashboardProps {
   user: User;
   transactions: Transaction[];
-  habitCheckIns: string[];
   activityLog: string[];
   savingsGoals: SavingsGoal[];
   onLogout: () => void;
   onUpdateUser: (user: Partial<User>) => void;
-  onUpdateTransactions: (transactions: Transaction[]) => void;
-  onUpdateHabits: (habits: string[]) => void;
+  onSetTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
+  onUpsertTransactions: (transactions: Transaction[]) => void;
+  onDeleteTransactions: (ids: string[]) => void;
   onUpdateActivityLog: (log: string[]) => void;
-  onUpdateSavingsGoals: (goals: SavingsGoal[]) => void;
+  onSetSavingsGoals: React.Dispatch<React.SetStateAction<SavingsGoal[]>>;
+  onUpsertSavingsGoals: (goals: SavingsGoal[]) => void;
+  onDeleteSavingsGoal: (goalId: string) => void;
   onRestoreData: (data: BackupData) => void;
   onDeleteAllData: () => void;
   onDeleteAccount: () => void;
@@ -89,15 +92,17 @@ const tourSteps = [
 const Dashboard: React.FC<DashboardProps> = ({ 
   user, 
   transactions, 
-  habitCheckIns,
   activityLog,
   savingsGoals,
   onLogout, 
   onUpdateUser,
-  onUpdateTransactions,
-  onUpdateHabits,
+  onSetTransactions,
+  onUpsertTransactions,
+  onDeleteTransactions,
   onUpdateActivityLog,
-  onUpdateSavingsGoals,
+  onSetSavingsGoals,
+  onUpsertSavingsGoals,
+  onDeleteSavingsGoal,
   onRestoreData,
   onDeleteAllData,
   onDeleteAccount,
@@ -106,17 +111,17 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
 
   const [isAssignGoalModalOpen, setAssignGoalModalOpen] = useState(false);
-  const [pendingTransactionForGoal, setPendingTransactionForGoal] = useState<Omit<Transaction, 'id' | 'goalId'> | null>(null);
+  const [pendingTransactionForGoal, setPendingTransactionForGoal] = useState<Omit<Transaction, 'id' | 'goal_id'> | null>(null);
   
   const [isWithdrawFromGoalModalOpen, setWithdrawFromGoalModalOpen] = useState(false);
-  const [pendingTransactionForWithdrawal, setPendingTransactionForWithdrawal] = useState<Omit<Transaction, 'id' | 'goalId'> | null>(null);
+  const [pendingTransactionForWithdrawal, setPendingTransactionForWithdrawal] = useState<Omit<Transaction, 'id' | 'goal_id'> | null>(null);
 
 
   const [timePeriod, setTimePeriod] = useState<TimePeriod>(user.settings?.defaultDashboardView || TimePeriod.MONTHLY);
   const [dateRange, setDateRange] = useState<{ start: string | null; end: string | null }>({ start: null, end: null });
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [currentView, setCurrentView] = useState<'dashboard' | 'settings'>('dashboard');
-  const [showWelcomeModal, setShowWelcomeModal] = useState(user.isNewUser || false);
+  const [showWelcomeModal, setShowWelcomeModal] = useState(user.is_new_user || false);
   
   const [showFin, setShowFin] = useState(false);
   const [finAnimation, setFinAnimation] = useState<'idle' | 'cheer'>('idle');
@@ -136,17 +141,32 @@ const Dashboard: React.FC<DashboardProps> = ({
   
   const [goalToDelete, setGoalToDelete] = useState<SavingsGoal | null>(null);
   const [isDeleteGoalConfirmOpen, setIsDeleteGoalConfirmOpen] = useState(false);
+  const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false);
+  const filterMenuRef = useRef<HTMLDivElement>(null);
 
 
   const currencySymbol = useMemo(() => CURRENCY_SYMBOLS[user.settings?.currency || 'USD'], [user.settings]);
 
   useEffect(() => {
     const wasOnSettings = previousViewRef.current === 'settings';
-    if (wasOnSettings && currentView === 'dashboard' && !user.hasCompletedTour) {
+    if (wasOnSettings && currentView === 'dashboard' && !user.has_completed_tour) {
       setTimeout(() => setTourStep(0), 300); 
     }
     previousViewRef.current = currentView;
-  }, [currentView, user.hasCompletedTour]);
+  }, [currentView, user.has_completed_tour]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+        if (filterMenuRef.current && !filterMenuRef.current.contains(event.target as Node)) {
+            setIsFilterMenuOpen(false);
+        }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
 
   useEffect(() => {
@@ -174,24 +194,34 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   const handleAddOrUpdateTransaction = (transactionData: Omit<Transaction, 'id'>, id?: string) => {
     if (id) { // Editing
-      const updatedTransactions = transactions.map(t => t.id === id ? { ...t, ...transactionData } : t);
-      onUpdateTransactions(updatedTransactions);
+      const originalTransaction = transactions.find(t => t.id === id);
+      if (!originalTransaction) return;
+
+      const updatedTransaction = { ...originalTransaction, ...transactionData };
+      
+      // Optimistic update
+      onSetTransactions(current => current.map(t => (t.id === id ? updatedTransaction : t)));
+      // DB update
+      onUpsertTransactions([updatedTransaction]);
     } else { // Adding a new transaction
-      const newTransaction = { ...transactionData, id: crypto.randomUUID(), isValid: true };
-      onUpdateTransactions([...transactions, newTransaction]);
+      const newTransaction = { ...transactionData, id: crypto.randomUUID(), is_valid: true } as Transaction;
+      // Optimistic update
+      onSetTransactions(current => [newTransaction, ...current].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+      // DB update
+      onUpsertTransactions([newTransaction]);
       // The act of adding a transaction, regardless of its date, counts as today's activity.
       logTodaysActivity();
     }
     setEditingTransaction(null);
   };
   
-  const handleAddSavingsTransaction = (transaction: Omit<Transaction, 'id' | 'goalId'>, id?: string) => {
+  const handleAddSavingsTransaction = (transaction: Omit<Transaction, 'id' | 'goal_id'>, id?: string) => {
     setPendingTransactionForGoal(transaction);
     setTransactionModalOpen(false);
     setAssignGoalModalOpen(true);
   };
   
-  const handleAddWithdrawalTransaction = (transaction: Omit<Transaction, 'id' | 'goalId'>) => {
+  const handleAddWithdrawalTransaction = (transaction: Omit<Transaction, 'id' | 'goal_id'>) => {
     setPendingTransactionForWithdrawal(transaction);
     setTransactionModalOpen(false);
     setWithdrawFromGoalModalOpen(true);
@@ -216,15 +246,19 @@ const Dashboard: React.FC<DashboardProps> = ({
     });
   };
 
-  const executeDeleteTransactions = (idsToDelete: Set<string>) => {
-    onUpdateTransactions(transactions.filter(t => !idsToDelete.has(t.id)));
+  const executeDeleteTransactions = (idsToDelete: string[]) => {
+    // Optimistic update
+    onSetTransactions(current => current.filter(t => !idsToDelete.includes(t.id)));
+    // DB update
+    onDeleteTransactions(idsToDelete);
+
     setSelectionMode(false);
     setSelectedIds(new Set());
     setDetailModalTransaction(null);
   }
 
   const handleDeleteTransactionsRequest = (ids: string[]) => {
-    handleProtectedAction(() => executeDeleteTransactions(new Set(ids)));
+    handleProtectedAction(() => executeDeleteTransactions(ids));
   };
 
   const handleEditTransactionRequest = (transaction: Transaction) => {
@@ -261,8 +295,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   
   const executeDeleteGoal = () => {
     if (!goalToDelete) return;
-    const updatedGoals = savingsGoals.filter(g => g.id !== goalToDelete.id);
-    onUpdateSavingsGoals(updatedGoals);
+    onDeleteSavingsGoal(goalToDelete.id);
     setIsDeleteGoalConfirmOpen(false);
     setGoalToDelete(null);
   };
@@ -296,12 +329,12 @@ const Dashboard: React.FC<DashboardProps> = ({
   const handleStartPersonalization = () => {
     setShowWelcomeModal(false);
     setCurrentView('settings');
-    onUpdateUser({ isNewUser: false });
+    onUpdateUser({ is_new_user: false });
   };
   
   const handleCompleteTour = () => {
     setTourStep(null);
-    onUpdateUser({ hasCompletedTour: true });
+    onUpdateUser({ has_completed_tour: true });
   }
 
   const isDateRangeActive = useMemo(() => !!(dateRange.start || dateRange.end), [dateRange]);
@@ -348,7 +381,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     });
   }, [transactions, timePeriod, dateRange, isDateRangeActive]);
 
-  const { totalIncome, totalExpense, largestIncome, largestExpense, mostFrequentCategory } = useMemo(() => {
+  const { totalIncome, totalExpense, largestIncome, largestExpense } = useMemo(() => {
     const incomeTransactions = filteredData.filter(t => t.type === TransactionType.INCOME);
     const expenseTransactions = filteredData.filter(t => t.type === TransactionType.EXPENSE);
 
@@ -358,45 +391,148 @@ const Dashboard: React.FC<DashboardProps> = ({
     const largestIncome = incomeTransactions.reduce((max, t) => t.amount > max.amount ? t : max, { amount: 0, category: 'N/A' } as Transaction);
     const largestExpense = expenseTransactions.reduce((max, t) => t.amount > max.amount ? t : max, { amount: 0, category: 'N/A' } as Transaction);
 
-    const categoryCounts = expenseTransactions.reduce((acc, t) => {
-        acc[t.category] = (acc[t.category] || 0) + 1;
-        return acc;
-    }, {} as Record<string, number>);
-
-    const mostFrequentCategory = Object.keys(categoryCounts).reduce((a, b) => categoryCounts[a] > categoryCounts[b] ? a : b, 'None');
-
-    return { totalIncome, totalExpense, largestIncome, largestExpense, mostFrequentCategory };
+    return { totalIncome, totalExpense, largestIncome, largestExpense };
   }, [filteredData]);
   
   const balance = totalIncome - totalExpense;
 
   const chartData: ChartData[] = useMemo(() => {
-    const dataMap = new Map<string, { income: number, expense: number }>();
-    const formatKey = (date: Date): string => {
-       if (isDateRangeActive) {
-           return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-       }
-       switch (timePeriod) {
-            case TimePeriod.DAILY: return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            case TimePeriod.WEEKLY: return date.toLocaleDateString([], { weekday: 'short' });
-            case TimePeriod.MONTHLY: return date.toLocaleDateString([], { day: 'numeric' });
-            case TimePeriod.YEARLY: return date.toLocaleDateString([], { month: 'short' });
-            default: return '';
+    const now = new Date();
+    const dataMap = new Map<string, { income: number; expense: number }>();
+
+    if (isDateRangeActive) {
+        // Handle single-day selection
+        if (dateRange.start && dateRange.end && dateRange.start === dateRange.end) {
+            const selectedDate = new Date(dateRange.start + 'T00:00:00');
+            const isToday = selectedDate.toDateString() === now.toDateString();
+            const hoursToShow = isToday ? now.getHours() : 23;
+
+            const labels: string[] = [];
+            for (let i = 0; i <= hoursToShow; i++) {
+                const hour = i % 12 === 0 ? 12 : i % 12;
+                const ampm = i < 12 ? 'AM' : 'PM';
+                labels.push(`${hour}${ampm}`);
+            }
+
+            labels.forEach(label => dataMap.set(label, { income: 0, expense: 0 }));
+
+            filteredData.forEach(t => {
+                const tDate = new Date(t.date);
+                const hourRaw = tDate.getHours();
+                const hour = hourRaw % 12 === 0 ? 12 : hourRaw % 12;
+                const ampm = hourRaw < 12 ? 'AM' : 'PM';
+                const key = `${hour}${ampm}`;
+
+                if (dataMap.has(key)) {
+                    const current = dataMap.get(key)!;
+                    if (t.type === TransactionType.INCOME) current.income += t.amount;
+                    else current.expense += t.amount;
+                }
+            });
+
+            return Array.from(dataMap.entries()).map(([name, values]) => ({ name, ...values }));
         }
-    };
 
-    const sortedData = [...filteredData].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        // Handle multi-day range
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        let startDate = dateRange.start ? new Date(dateRange.start + 'T00:00:00') : null;
+        let endDate = dateRange.end ? new Date(dateRange.end + 'T00:00:00') : today;
 
-    sortedData.forEach(t => {
-      const key = formatKey(new Date(t.date));
-      if (!dataMap.has(key)) dataMap.set(key, { income: 0, expense: 0 });
-      const current = dataMap.get(key)!;
-      if (t.type === TransactionType.INCOME) current.income += t.amount;
-      else current.expense += t.amount;
+        if (dateRange.start && !dateRange.end) {
+            endDate = today;
+        } else if (!dateRange.start && dateRange.end) {
+            startDate = new Date(endDate);
+            startDate.setDate(startDate.getDate() - 29); // 30 day range
+        }
+        
+        if (!startDate) { // Fallback for safety
+            startDate = new Date();
+            startDate.setDate(startDate.getDate() - 29);
+        }
+
+        if (startDate > endDate) {
+            [startDate, endDate] = [endDate, startDate];
+        }
+        
+        const currentDate = new Date(startDate);
+        while (currentDate <= endDate) {
+            const key = currentDate.toLocaleDateString([], { month: 'short', day: 'numeric' });
+            dataMap.set(key, { income: 0, expense: 0 });
+            currentDate.setDate(currentDate.getDate() + 1);
+        }
+
+        filteredData.forEach(t => {
+            const key = new Date(t.date).toLocaleDateString([], { month: 'short', day: 'numeric' });
+            if (dataMap.has(key)) {
+                const current = dataMap.get(key)!;
+                if (t.type === TransactionType.INCOME) current.income += t.amount;
+                else current.expense += t.amount;
+            }
+        });
+        return Array.from(dataMap.entries()).map(([name, values]) => ({ name, ...values }));
+    }
+
+    const labels: string[] = [];
+    switch (timePeriod) {
+      case TimePeriod.DAILY:
+        for (let i = 0; i <= now.getHours(); i++) {
+          const hour = i % 12 === 0 ? 12 : i % 12;
+          const ampm = i < 12 ? 'AM' : 'PM';
+          labels.push(`${hour}${ampm}`);
+        }
+        break;
+      case TimePeriod.WEEKLY:
+        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        for (let i = 0; i <= now.getDay(); i++) {
+          labels.push(days[i]);
+        }
+        break;
+      case TimePeriod.MONTHLY:
+        for (let i = 1; i <= now.getDate(); i++) {
+          labels.push(String(i));
+        }
+        break;
+      case TimePeriod.YEARLY:
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        for (let i = 0; i <= now.getMonth(); i++) {
+          labels.push(months[i]);
+        }
+        break;
+    }
+
+    labels.forEach(label => dataMap.set(label, { income: 0, expense: 0 }));
+
+    filteredData.forEach(t => {
+      const tDate = new Date(t.date);
+      let key = '';
+      switch (timePeriod) {
+        case TimePeriod.DAILY:
+          const hourRaw = tDate.getHours();
+          const hour = hourRaw % 12 === 0 ? 12 : hourRaw % 12;
+          const ampm = hourRaw < 12 ? 'AM' : 'PM';
+          key = `${hour}${ampm}`;
+          break;
+        case TimePeriod.WEEKLY:
+          key = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][tDate.getDay()];
+          break;
+        case TimePeriod.MONTHLY:
+          key = String(tDate.getDate());
+          break;
+        case TimePeriod.YEARLY:
+          key = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][tDate.getMonth()];
+          break;
+      }
+      if (dataMap.has(key)) {
+        const current = dataMap.get(key)!;
+        if (t.type === TransactionType.INCOME) current.income += t.amount;
+        else current.expense += t.amount;
+      }
     });
 
     return Array.from(dataMap.entries()).map(([name, values]) => ({ name, ...values }));
-  }, [filteredData, timePeriod, isDateRangeActive]);
+  }, [filteredData, timePeriod, isDateRangeActive, dateRange]);
+
 
   const categoryData = useMemo(() => {
     const categoryMap = new Map<string, number>();
@@ -467,9 +603,11 @@ const Dashboard: React.FC<DashboardProps> = ({
             
             <div className="flex flex-col lg:flex-row gap-6 mb-6">
               <div id="tour-step-2" className="bg-gray-800/50 p-6 rounded-2xl shadow-lg border border-gray-700 lg:w-2/3">
-                <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
-                    <h3 className="text-xl font-bold flex items-center"><BarChart2 className="mr-2 text-indigo-400" />Expenditure Flow</h3>
-                    <div className="flex items-center space-x-1 bg-gray-700 p-1 rounded-lg flex-wrap">
+                <div className="flex items-center mb-4 flex-wrap gap-4">
+                    <h3 className="text-xl font-bold flex items-center mr-auto"><BarChart2 className="mr-2 text-indigo-400" />Expenditure Flow</h3>
+                    
+                    {/* Desktop filters */}
+                    <div className="hidden lg:flex items-center space-x-1 bg-gray-700 p-1 rounded-lg flex-wrap">
                         {Object.values(TimePeriod).map(p => (
                             <button key={p} onClick={() => { setTimePeriod(p); setDateRange({ start: null, end: null }); }} className={`px-3 py-1 text-sm rounded-md transition ${timePeriod === p && !isDateRangeActive ? 'bg-indigo-500 text-white' : 'hover:bg-gray-600'}`}>{p}</button>
                         ))}
@@ -500,6 +638,61 @@ const Dashboard: React.FC<DashboardProps> = ({
                                 </button>
                             )}
                         </div>
+                    </div>
+
+                    {/* Mobile filter button */}
+                    <div ref={filterMenuRef} className="relative lg:hidden">
+                        <button
+                            onClick={() => setIsFilterMenuOpen(prev => !prev)}
+                            className="bg-gray-700 hover:bg-gray-600 text-white p-2 rounded-lg transition"
+                            aria-label="Open filters"
+                        >
+                            <Filter size={20} />
+                        </button>
+
+                        {isFilterMenuOpen && (
+                            <div className="absolute top-full left-0 mt-2 w-72 max-w-[70vw] bg-gray-800 border border-gray-600 rounded-lg shadow-xl p-4 z-20">
+                                <div className="flex flex-col space-y-3">
+                                    <h4 className="font-bold text-lg mb-1">Period</h4>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {Object.values(TimePeriod).map(p => (
+                                            <button key={p} onClick={() => { setTimePeriod(p); setDateRange({ start: null, end: null }); setIsFilterMenuOpen(false); }} className={`px-3 py-2 text-sm rounded-md transition ${timePeriod === p && !isDateRangeActive ? 'bg-indigo-500 text-white' : 'bg-gray-700 hover:bg-gray-600'}`}>{p}</button>
+                                        ))}
+                                    </div>
+
+                                    <div className="border-t border-gray-700 my-2"></div>
+
+                                    <h4 className="font-bold text-lg mb-1">Custom Date Range</h4>
+                                    <div className="flex flex-col space-y-3">
+                                        <div className="flex items-center justify-between">
+                                            <label htmlFor="startDateMobile" className="text-sm text-gray-400">From:</label>
+                                            <input 
+                                                id="startDateMobile"
+                                                type="date" 
+                                                value={dateRange.start || ''}
+                                                onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+                                                className="bg-gray-600 text-white text-sm rounded-md p-1 border-gray-500 focus:ring-indigo-500 focus:border-indigo-500 w-40"
+                                            />
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                            <label htmlFor="endDateMobile" className="text-sm text-gray-400">To:</label>
+                                            <input 
+                                                id="endDateMobile"
+                                                type="date" 
+                                                value={dateRange.end || ''}
+                                                onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+                                                className="bg-gray-600 text-white text-sm rounded-md p-1 border-gray-500 focus:ring-indigo-500 focus:border-indigo-500 w-40"
+                                            />
+                                        </div>
+                                        {isDateRangeActive && (
+                                            <button onClick={() => { setDateRange({ start: null, end: null }); setIsFilterMenuOpen(false); }} className="text-sm text-red-400 hover:underline text-left mt-1">
+                                            Clear Date Range
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
                 <div style={{ width: '100%', height: 300 }}>
@@ -545,9 +738,10 @@ const Dashboard: React.FC<DashboardProps> = ({
             <div id="tour-step-3">
               <SavingsGoals
                   goals={savingsGoals}
-                  onUpdateGoals={onUpdateSavingsGoals}
-                  onUpdateTransactions={onUpdateTransactions}
-                  transactions={transactions}
+                  onSetSavingsGoals={onSetSavingsGoals}
+                  onUpsertSavingsGoals={onUpsertSavingsGoals}
+                  onSetTransactions={onSetTransactions}
+                  onUpsertTransactions={onUpsertTransactions}
                   currencySymbol={currencySymbol}
                   triggerFinCheer={triggerFinCheer}
                   onShowLog={setLogModalGoal}
@@ -607,7 +801,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                     {filteredData.map(t => (
                       <tr 
                         key={t.id} 
-                        className={`border-b border-gray-700/50 transition-colors ${selectionMode ? 'hover:bg-gray-700/50' : 'cursor-pointer hover:bg-gray-700/50'} ${(t.isValid === false) ? 'bg-red-900/40' : ''}`}
+                        className={`border-b border-gray-700/50 transition-colors ${selectionMode ? 'hover:bg-gray-700/50' : 'cursor-pointer hover:bg-gray-700/50'} ${(t.is_valid === false) ? 'bg-red-900/40' : ''}`}
                         onClick={() => !selectionMode && setDetailModalTransaction(t)}
                       >
                         {selectionMode && (
@@ -623,7 +817,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                         <td className="p-3">{currencySymbol}{t.amount.toFixed(2)}</td>
                         <td className="p-3 hidden md:table-cell">{new Date(t.date).toLocaleDateString()}</td>
                         <td className="p-3 text-right">
-                          {t.isValid === false ? (
+                          {t.is_valid === false ? (
                             <span className="inline-block px-2 py-1 text-xs font-semibold text-red-200 bg-red-800/50 rounded-full">Invalid</span>
                           ) : (
                             <span className="inline-block px-2 py-1 text-xs font-semibold text-green-200 bg-green-800/50 rounded-full">Valid</span>
@@ -667,7 +861,9 @@ const Dashboard: React.FC<DashboardProps> = ({
             onDeleteAllData={onDeleteAllData}
             onDeleteAccount={onDeleteAccount}
             savingsGoals={savingsGoals}
-            onUpdateSavingsGoals={onUpdateSavingsGoals}
+            onSetSavingsGoals={onSetSavingsGoals}
+            onUpsertSavingsGoals={onUpsertSavingsGoals}
+            onDeleteSavingsGoal={onDeleteSavingsGoal}
           />
         )}
       </main>
@@ -759,9 +955,10 @@ const Dashboard: React.FC<DashboardProps> = ({
           onClose={() => setAssignGoalModalOpen(false)}
           pendingTransaction={pendingTransactionForGoal}
           goals={savingsGoals}
-          onUpdateGoals={onUpdateSavingsGoals}
-          transactions={transactions}
-          onUpdateTransactions={onUpdateTransactions}
+          onSetSavingsGoals={onSetSavingsGoals}
+          onUpsertSavingsGoals={onUpsertSavingsGoals}
+          onSetTransactions={onSetTransactions}
+          onUpsertTransactions={onUpsertTransactions}
           currencySymbol={currencySymbol}
           triggerFinCheer={triggerFinCheer}
         />
@@ -773,8 +970,8 @@ const Dashboard: React.FC<DashboardProps> = ({
           onClose={() => setWithdrawFromGoalModalOpen(false)}
           pendingTransaction={pendingTransactionForWithdrawal}
           goals={savingsGoals}
-          transactions={transactions}
-          onUpdateTransactions={onUpdateTransactions}
+          onSetTransactions={onSetTransactions}
+          onUpsertTransactions={onUpsertTransactions}
           currencySymbol={currencySymbol}
         />
       )}
@@ -803,7 +1000,6 @@ const Dashboard: React.FC<DashboardProps> = ({
             activityLog={activityLog}
             largestIncome={largestIncome}
             largestExpense={largestExpense}
-            mostFrequentCategory={mostFrequentCategory}
           />
         )}
     </div>

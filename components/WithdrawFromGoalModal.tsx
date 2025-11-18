@@ -4,10 +4,10 @@ import { SavingsGoal, Transaction } from '../types';
 interface WithdrawFromGoalModalProps {
     isOpen: boolean;
     onClose: () => void;
-    pendingTransaction: Omit<Transaction, 'id' | 'goalId'>;
+    pendingTransaction: Omit<Transaction, 'id' | 'goal_id'>;
     goals: SavingsGoal[];
-    transactions: Transaction[];
-    onUpdateTransactions: (transactions: Transaction[]) => void;
+    onSetTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
+    onUpsertTransactions: (transactions: Transaction[]) => void;
     currencySymbol: string;
 }
 
@@ -16,13 +16,13 @@ const WithdrawFromGoalModal: React.FC<WithdrawFromGoalModalProps> = ({
     onClose,
     pendingTransaction,
     goals,
-    transactions,
-    onUpdateTransactions,
+    onSetTransactions,
+    onUpsertTransactions,
     currencySymbol,
 }) => {
     
     const availableGoals = useMemo(() => {
-        return goals.filter(g => g.currentAmount >= pendingTransaction.amount && !g.isArchived);
+        return goals.filter(g => g.current_amount >= pendingTransaction.amount && !g.is_archived);
     }, [goals, pendingTransaction.amount]);
 
 
@@ -35,14 +35,15 @@ const WithdrawFromGoalModal: React.FC<WithdrawFromGoalModalProps> = ({
             description: pendingTransaction.description 
                 ? `${pendingTransaction.description} (From Goal: ${goal.name})`
                 : `Withdrawal from savings goal: "${goal.name}"`,
-            goalId: goal.id,
-            isValid: true,
-            savingsMeta: {
-                previousAmount: goal.currentAmount,
-                currentAmount: goal.currentAmount - pendingTransaction.amount,
+            goal_id: goal.id,
+            is_valid: true,
+            savings_meta: {
+                previousAmount: goal.current_amount,
+                currentAmount: goal.current_amount - pendingTransaction.amount,
             },
         };
-        onUpdateTransactions([...transactions, newTransaction]);
+        onSetTransactions(current => [newTransaction, ...current].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+        onUpsertTransactions([newTransaction]);
         onClose();
     };
 
@@ -64,7 +65,7 @@ const WithdrawFromGoalModal: React.FC<WithdrawFromGoalModalProps> = ({
                                 <div className="flex-grow">
                                     <p className="font-semibold text-white">{goal.name}</p>
                                     <p className="text-xs text-gray-400">
-                                        Available: {currencySymbol}{goal.currentAmount.toFixed(2)}
+                                        Available: {currencySymbol}{goal.current_amount.toFixed(2)}
                                     </p>
                                 </div>
                             </button>

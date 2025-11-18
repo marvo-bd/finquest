@@ -1,3 +1,5 @@
+
+
 import React, { useState, useMemo } from 'react';
 import { User, SavingsGoal } from '../types';
 import { ArchiveRestore, Trash2, ShieldQuestion, KeyRound } from 'lucide-react';
@@ -10,12 +12,14 @@ import ResetPinModal from './ResetPinModal';
 interface ArchivedQuestsPageProps {
   user: User;
   goals: SavingsGoal[];
-  onUpdateGoals: (goals: SavingsGoal[]) => void;
+  onSetSavingsGoals: React.Dispatch<React.SetStateAction<SavingsGoal[]>>;
+  onUpsertSavingsGoals: (goals: SavingsGoal[]) => void;
   onUpdateUser: (user: Partial<User>) => void;
   onBack: () => void;
+  onDeleteSavingsGoal: (goalId: string) => void;
 }
 
-const ArchivedQuestsPage: React.FC<ArchivedQuestsPageProps> = ({ user, goals, onUpdateGoals, onUpdateUser, onBack }) => {
+const ArchivedQuestsPage: React.FC<ArchivedQuestsPageProps> = ({ user, goals, onSetSavingsGoals, onUpsertSavingsGoals, onUpdateUser, onBack, onDeleteSavingsGoal }) => {
     const [goalToDelete, setGoalToDelete] = useState<SavingsGoal | null>(null);
     const [isPinPromptOpen, setIsPinPromptOpen] = useState(false);
     const [isSetupPinModalOpen, setIsSetupPinModalOpen] = useState(false);
@@ -23,11 +27,14 @@ const ArchivedQuestsPage: React.FC<ArchivedQuestsPageProps> = ({ user, goals, on
     const [actionToConfirm, setActionToConfirm] = useState<(() => void) | null>(null);
 
     const currencySymbol = CURRENCY_SYMBOLS[user.settings?.currency || 'USD'];
-    const archivedGoals = useMemo(() => goals.filter(g => g.isArchived).sort((a,b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()), [goals]);
+    const archivedGoals = useMemo(() => goals.filter(g => g.is_archived).sort((a,b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()), [goals]);
 
     const handleUnarchive = (goalToUnarchive: SavingsGoal) => {
-        const updatedGoals = goals.map(g => g.id === goalToUnarchive.id ? { ...g, isArchived: false } : g);
-        onUpdateGoals(updatedGoals);
+        const updatedGoal = { ...goalToUnarchive, is_archived: false };
+        // Optimistic UI update
+        onSetSavingsGoals(currentGoals => currentGoals.map(g => g.id === goalToUnarchive.id ? updatedGoal : g));
+        // Database update
+        onUpsertSavingsGoals([updatedGoal]);
     };
 
     const handleProtectedAction = (action: () => void) => {
@@ -48,8 +55,7 @@ const ArchivedQuestsPage: React.FC<ArchivedQuestsPageProps> = ({ user, goals, on
     
     const executeDelete = () => {
         if (!goalToDelete) return;
-        const updatedGoals = goals.filter(g => g.id !== goalToDelete.id);
-        onUpdateGoals(updatedGoals);
+        onDeleteSavingsGoal(goalToDelete.id);
         setGoalToDelete(null);
     };
 
@@ -78,7 +84,7 @@ const ArchivedQuestsPage: React.FC<ArchivedQuestsPageProps> = ({ user, goals, on
                                     <div>
                                         <p className="font-bold text-lg text-gray-300">{goal.name}</p>
                                         <p className="text-xs text-gray-400">
-                                            Completed with {currencySymbol}{goal.currentAmount.toFixed(2)} / {currencySymbol}{goal.targetAmount.toFixed(2)}
+                                            Completed with {currencySymbol}{goal.current_amount.toFixed(2)} / {currencySymbol}{goal.target_amount.toFixed(2)}
                                         </p>
                                     </div>
                                 </div>

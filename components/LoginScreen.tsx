@@ -1,42 +1,35 @@
 import React, { useState } from 'react';
-import { User, TimePeriod } from '../types';
-import { Currency } from '../constants';
+import { supabase } from '../services/supabaseClient';
 
 interface LoginScreenProps {
-  onLogin: (user: User) => void;
   onNavigateToTerms: () => void;
   onNavigateToPrivacy: () => void;
 }
 
-const MOCK_USER_ID = '123456789';
-
-const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onNavigateToTerms, onNavigateToPrivacy }) => {
+const LoginScreen: React.FC<LoginScreenProps> = ({ onNavigateToTerms, onNavigateToPrivacy }) => {
   const [agreed, setAgreed] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const handleMockLogin = () => {
-    const userProfileKey = `finquest_profile_${MOCK_USER_ID}`;
-    const storedProfile = localStorage.getItem(userProfileKey);
-    let userToLogin: User;
+  const handleLogin = async () => {
+    setLoading(true);
+    setError('');
+    // Fix: supabase.auth.signInWithOAuth is the correct method for Supabase JS v2.
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin,
+        scopes: 'profile email', // Explicitly request user profile data
+        queryParams: {
+          prompt: 'select_account', // Always show the account chooser
+        },
+      },
+    });
 
-    if (storedProfile) {
-      // User has logged in before, load their profile
-      userToLogin = JSON.parse(storedProfile);
-    } else {
-      // First time login for this mock user
-      userToLogin = {
-        id: MOCK_USER_ID,
-        name: 'Alex Doe',
-        email: 'alex.doe@example.com',
-        imageUrl: `https://picsum.photos/seed/alex/100/100`,
-        isNewUser: true, // This is a truly new user
-        hasCompletedTour: false, // User has not seen the tour yet
-        settings: {
-          currency: 'USD' as Currency,
-          defaultDashboardView: TimePeriod.MONTHLY,
-        }
-      };
+    if (error) {
+      setError('Failed to sign in. Please try again.');
+      setLoading(false);
     }
-    onLogin(userToLogin);
   };
 
   return (
@@ -74,22 +67,26 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onNavigateToTerms, o
         </div>
 
         <button
-          onClick={handleMockLogin}
-          disabled={!agreed}
+          onClick={handleLogin}
+          disabled={!agreed || loading}
           className="w-full flex items-center justify-center gap-3 bg-white text-gray-800 font-semibold py-3 px-4 rounded-lg shadow-md hover:bg-gray-200 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <svg className="w-6 h-6" viewBox="0 0 48 48">
-            <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-            <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-            <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-            <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
-            <path fill="none" d="M0 0h48v48H0z"></path>
-          </svg>
-          Sign in with Google
+          {loading ? (
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900"></div>
+          ) : (
+            <>
+              <svg className="w-6 h-6" viewBox="0 0 48 48">
+                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
+                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
+                <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
+                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
+                <path fill="none" d="M0 0h48v48H0z"></path>
+              </svg>
+              Sign in with Google
+            </>
+          )}
         </button>
-        <p className="text-xs text-gray-500 mt-4">
-          Authentication is simulated for this environment.
-        </p>
+        {error && <p className="text-red-400 text-sm mt-4">{error}</p>}
       </div>
     </div>
   );

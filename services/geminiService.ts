@@ -1,14 +1,21 @@
 
+
 import { GoogleGenAI } from "@google/genai";
 import { Transaction } from '../types';
 import { Currency } from '../constants';
 
-// Fix: Per Gemini API guidelines, initialize the AI client directly with the
-// environment variable and assume it is present. Removed fallback logic for missing key.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
+// Fix: Provided a fallback placeholder for the API key to prevent a crash on startup
+// in environments where process.env is not defined.
+const API_KEY = process.env.API_KEY || 'placeholder_api_key';
+const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 
 const generateFinancialInsight = async (transactions: Transaction[], currency: Currency): Promise<string> => {
+  // Add a check to fail gracefully if the API key is just a placeholder.
+  if (API_KEY === 'placeholder_api_key') {
+    return "✨ Fin's AI features are currently offline. Please check the API key configuration.";
+  }
+  
   const model = 'gemini-2.5-flash';
 
   const simplifiedTransactions = transactions.map(({ type, category, amount, date }) => ({
@@ -48,6 +55,10 @@ const generateFinancialInsight = async (transactions: Transaction[], currency: C
 };
 
 const generatePdfSummary = async (transactions: Transaction[], totalIncome: number, totalExpense: number, currency: Currency): Promise<string> => {
+  if (API_KEY === 'placeholder_api_key') {
+    return "AI summary is unavailable because the API key has not been configured.";
+  }
+  
   const model = 'gemini-2.5-flash';
   const simplifiedTransactions = transactions.slice(0, 20).map(({ type, category, amount, date }) => ({
     type, category, amount, date: new Date(date).toLocaleDateString()

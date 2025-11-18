@@ -2,13 +2,13 @@ import React, { useState, useMemo } from 'react';
 import { SavingsGoal, Transaction, TransactionType } from '../types';
 import { PiggyBank, Plus, Target, Check, Trash2, Edit, ArrowDown, ArrowUp, Bell, Archive } from 'lucide-react';
 import ConfirmationModal from './common/ConfirmationModal';
-import { DEFAULT_SAVINGS_GOAL_ID } from '../constants';
 
 interface SavingsGoalsProps {
   goals: SavingsGoal[];
-  onUpdateGoals: (goals: SavingsGoal[]) => void;
-  onUpdateTransactions: (transactions: Transaction[]) => void;
-  transactions: Transaction[];
+  onSetSavingsGoals: React.Dispatch<React.SetStateAction<SavingsGoal[]>>;
+  onUpsertSavingsGoals: (goals: SavingsGoal[]) => void;
+  onSetTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
+  onUpsertTransactions: (transactions: Transaction[]) => void;
   currencySymbol: string;
   triggerFinCheer: () => void;
   onShowLog: (goal: SavingsGoal) => void;
@@ -17,7 +17,7 @@ interface SavingsGoalsProps {
 
 const EMOJI_OPTIONS = ['💰', '💻', '✈️', '🚗', '🏠', '🎓', '🎁', '🚑', '💍', '🎮', '📱'];
 
-const SavingsGoals: React.FC<SavingsGoalsProps> = ({ goals, onUpdateGoals, onUpdateTransactions, transactions, currencySymbol, triggerFinCheer, onShowLog, onDeleteGoalRequest }) => {
+const SavingsGoals: React.FC<SavingsGoalsProps> = ({ goals, onSetSavingsGoals, onUpsertSavingsGoals, onSetTransactions, onUpsertTransactions, currencySymbol, triggerFinCheer, onShowLog, onDeleteGoalRequest }) => {
   const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
   const [isFundsModalOpen, setIsFundsModalOpen] = useState<SavingsGoal | null>(null);
   const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState<SavingsGoal | null>(null);
@@ -44,10 +44,10 @@ const SavingsGoals: React.FC<SavingsGoalsProps> = ({ goals, onUpdateGoals, onUpd
   };
   
   const openEditGoalModal = (goal: SavingsGoal) => {
-    if (goal.isDeletable === false) return;
+    if (goal.is_deletable === false) return;
     setEditingGoal(goal);
     setGoalName(goal.name);
-    setTargetAmount(String(goal.targetAmount));
+    setTargetAmount(String(goal.target_amount));
     setSelectedEmoji(goal.emoji);
     setEditError('');
     setIsGoalModalOpen(true);
@@ -56,32 +56,44 @@ const SavingsGoals: React.FC<SavingsGoalsProps> = ({ goals, onUpdateGoals, onUpd
   const handleGoalSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setEditError('');
-    if (!goalName || !targetAmount || !selectedEmoji) return;
+    const trimmedGoalName = goalName.trim();
+    if (!trimmedGoalName || !targetAmount || !selectedEmoji) return;
+    
+    const isDuplicate = goals.some(
+      (g) =>
+        !g.is_archived &&
+        g.name.trim().toLowerCase() === trimmedGoalName.toLowerCase() &&
+        (!editingGoal || g.id !== editingGoal.id)
+    );
+
+    if (isDuplicate) {
+      setEditError('An active quest with this name already exists.');
+      return;
+    }
 
     if (editingGoal) {
         const newTarget = parseFloat(targetAmount);
-        if (newTarget < editingGoal.currentAmount) {
-            setEditError(`Target cannot be less than the current saved amount of ${currencySymbol}${editingGoal.currentAmount.toFixed(2)}.`);
+        if (newTarget < editingGoal.current_amount) {
+            setEditError(`Target cannot be less than the current saved amount of ${currencySymbol}${editingGoal.current_amount.toFixed(2)}.`);
             return;
         }
-        const updatedGoals = goals.map(g => 
-            g.id === editingGoal.id 
-            ? { ...g, name: goalName, targetAmount: parseFloat(targetAmount), emoji: selectedEmoji } 
-            : g
-        );
-        onUpdateGoals(updatedGoals);
+        const updatedGoal = { ...editingGoal, name: trimmedGoalName, target_amount: parseFloat(targetAmount), emoji: selectedEmoji };
+        onSetSavingsGoals(currentGoals => currentGoals.map(g => g.id === editingGoal.id ? updatedGoal : g));
+        onUpsertSavingsGoals([updatedGoal]);
     } else {
         const newGoal: SavingsGoal = {
             id: crypto.randomUUID(),
-            name: goalName,
-            targetAmount: parseFloat(targetAmount),
-            currentAmount: 0,
+            name: trimmedGoalName,
+            target_amount: parseFloat(targetAmount),
+            current_amount: 0,
             emoji: selectedEmoji,
-            createdAt: new Date().toISOString(),
-            isDeletable: true,
-            isArchived: false,
+            created_at: new Date().toISOString(),
+            is_deletable: true,
+            is_archived: false,
+            user_id: '', // Will be set in App.tsx
         };
-        onUpdateGoals([...goals, newGoal]);
+        onSetSavingsGoals(currentGoals => [...currentGoals, newGoal]);
+        onUpsertSavingsGoals([newGoal]);
     }
     
     setIsGoalModalOpen(false);
@@ -93,11 +105,11 @@ const SavingsGoals: React.FC<SavingsGoalsProps> = ({ goals, onUpdateGoals, onUpd
 
     const amount = parseFloat(fundsAmount);
     const goal = isFundsModalOpen;
-    const generalGoal = goals.find(g => g.id === DEFAULT_SAVINGS_GOAL_ID);
+    const generalGoal = goals.find(g => g.is_deletable === false);
     
     // Handle over-contribution by splitting the transaction
-    if (goal.isDeletable !== false && (goal.currentAmount + amount) > goal.targetAmount) {
-        const amountToComplete = goal.targetAmount - goal.currentAmount;
+    if (goal.is_deletable !== false && (goal.current_amount + amount) > goal.target_amount) {
+        const amountToComplete = goal.target_amount - goal.current_amount;
         const spilloverAmount = amount - amountToComplete;
         
         const transactionsToAdd: Transaction[] = [];
@@ -110,11 +122,11 @@ const SavingsGoals: React.FC<SavingsGoalsProps> = ({ goals, onUpdateGoals, onUpd
                 amount: amountToComplete,
                 date: new Date().toISOString(),
                 description: `Final contribution to complete: "${goal.name}"`,
-                goalId: goal.id,
-                isValid: true,
-                savingsMeta: {
-                    previousAmount: goal.currentAmount,
-                    currentAmount: goal.targetAmount,
+                goal_id: goal.id,
+                is_valid: true,
+                savings_meta: {
+                    previousAmount: goal.current_amount,
+                    currentAmount: goal.target_amount,
                 },
             });
         }
@@ -127,30 +139,39 @@ const SavingsGoals: React.FC<SavingsGoalsProps> = ({ goals, onUpdateGoals, onUpd
                 amount: spilloverAmount,
                 date: new Date().toISOString(),
                 description: `Spillover from "${goal.name}" to General Savings`,
-                goalId: generalGoal.id,
-                isValid: true,
-                savingsMeta: {
-                    previousAmount: generalGoal.currentAmount,
-                    currentAmount: generalGoal.currentAmount + spilloverAmount,
+                goal_id: generalGoal.id,
+                is_valid: true,
+                savings_meta: {
+                    previousAmount: generalGoal.current_amount,
+                    currentAmount: generalGoal.current_amount + spilloverAmount,
                 },
             });
         }
         
-        onUpdateTransactions([...transactions, ...transactionsToAdd]);
+        onSetTransactions(current => [...current, ...transactionsToAdd].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+        onUpsertTransactions(transactionsToAdd);
         
         const spilloverMessage = `Excess of ${currencySymbol}${spilloverAmount.toFixed(2)} transferred to General Savings.`;
         const generalGoalReceiptMessage = `Received ${currencySymbol}${spilloverAmount.toFixed(2)} spillover from "${goal.name}".`;
 
-        const updatedGoals = goals.map(g => {
-            if (g.id === goal.id) {
-                return { ...g, unreadNotificationMessage: spilloverMessage };
-            }
-            if (spilloverAmount > 0.001 && g.id === generalGoal?.id) {
-                 return { ...g, unreadNotificationMessage: generalGoalReceiptMessage };
-            }
-            return g;
+        const goalsToUpsert: SavingsGoal[] = [];
+        onSetSavingsGoals(currentGoals => {
+            const updatedGoals = currentGoals.map(g => {
+                if (g.id === goal.id) {
+                    const updated = { ...g, unread_notification_message: spilloverMessage };
+                    goalsToUpsert.push(updated);
+                    return updated;
+                }
+                if (spilloverAmount > 0.001 && g.id === generalGoal?.id) {
+                     const updated = { ...g, unread_notification_message: generalGoalReceiptMessage };
+                     goalsToUpsert.push(updated);
+                     return updated;
+                }
+                return g;
+            });
+            onUpsertSavingsGoals(goalsToUpsert);
+            return updatedGoals;
         });
-        onUpdateGoals(updatedGoals);
         triggerFinCheer();
 
     } else {
@@ -162,16 +183,17 @@ const SavingsGoals: React.FC<SavingsGoalsProps> = ({ goals, onUpdateGoals, onUpd
             amount: amount,
             date: new Date().toISOString(),
             description: `Contribution to savings goal: "${goal.name}"`,
-            goalId: goal.id,
-            isValid: true,
-            savingsMeta: {
-              previousAmount: goal.currentAmount,
-              currentAmount: goal.currentAmount + amount,
+            goal_id: goal.id,
+            is_valid: true,
+            savings_meta: {
+              previousAmount: goal.current_amount,
+              currentAmount: goal.current_amount + amount,
             },
         };
-        onUpdateTransactions([...transactions, newTransaction]);
+        onSetTransactions(current => [newTransaction, ...current].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+        onUpsertTransactions([newTransaction]);
         
-        if (goal.isDeletable !== false && goal.currentAmount < goal.targetAmount && (goal.currentAmount + amount) >= goal.targetAmount) {
+        if (goal.is_deletable !== false && goal.current_amount < goal.target_amount && (goal.current_amount + amount) >= goal.target_amount) {
           triggerFinCheer();
         }
     }
@@ -189,8 +211,8 @@ const SavingsGoals: React.FC<SavingsGoalsProps> = ({ goals, onUpdateGoals, onUpd
     const amount = parseFloat(withdrawAmount);
     const goal = isWithdrawModalOpen;
 
-    if (amount > goal.currentAmount) {
-      setWithdrawError(`Cannot withdraw more than the available ${currencySymbol}${goal.currentAmount.toFixed(2)}.`);
+    if (amount > goal.current_amount) {
+      setWithdrawError(`Cannot withdraw more than the available ${currencySymbol}${goal.current_amount.toFixed(2)}.`);
       return;
     }
 
@@ -201,14 +223,15 @@ const SavingsGoals: React.FC<SavingsGoalsProps> = ({ goals, onUpdateGoals, onUpd
       amount: amount,
       date: new Date().toISOString(),
       description: `Withdrawal from savings goal: "${goal.name}"`,
-      goalId: goal.id,
-      isValid: true,
-      savingsMeta: {
-          previousAmount: goal.currentAmount,
-          currentAmount: goal.currentAmount - amount,
+      goal_id: goal.id,
+      is_valid: true,
+      savings_meta: {
+          previousAmount: goal.current_amount,
+          currentAmount: goal.current_amount - amount,
       },
     };
-    onUpdateTransactions([...transactions, newTransaction]);
+    onSetTransactions(current => [newTransaction, ...current].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+    onUpsertTransactions([newTransaction]);
     
     setIsWithdrawModalOpen(null);
     setWithdrawAmount('');
@@ -216,32 +239,34 @@ const SavingsGoals: React.FC<SavingsGoalsProps> = ({ goals, onUpdateGoals, onUpd
   
   const handleArchiveConfirm = () => {
     if (!goalToArchive) return;
-    const updatedGoals = goals.map(g => g.id === goalToArchive.id ? { ...g, isArchived: true } : g);
-    onUpdateGoals(updatedGoals);
+    const updatedGoal = { ...goalToArchive, is_archived: true };
+    onSetSavingsGoals(currentGoals => currentGoals.map(g => g.id === goalToArchive.id ? updatedGoal : g));
+    onUpsertSavingsGoals([updatedGoal]);
     setGoalToArchive(null);
   }
   
   const handleShowLog = (goal: SavingsGoal) => {
     onShowLog(goal);
-    if (goal.unreadNotificationMessage) {
-        const updatedGoals = goals.map(g => g.id === goal.id ? { ...g, unreadNotificationMessage: undefined } : g);
-        onUpdateGoals(updatedGoals);
+    if (goal.unread_notification_message) {
+        const updatedGoal = { ...goal, unread_notification_message: null };
+        onSetSavingsGoals(currentGoals => currentGoals.map(g => g.id === goal.id ? updatedGoal : g));
+        onUpsertSavingsGoals([updatedGoal]);
     }
   };
 
   const sortedGoals = useMemo(() => {
     return [...goals]
-      .filter(g => !g.isArchived)
+      .filter(g => !g.is_archived)
       .sort((a, b) => {
-      const aComplete = a.currentAmount >= a.targetAmount;
-      const bComplete = b.currentAmount >= b.targetAmount;
+      const aComplete = a.current_amount >= a.target_amount;
+      const bComplete = b.current_amount >= b.target_amount;
       if (aComplete && !bComplete) return 1;
       if (!aComplete && bComplete) return -1;
       
-      if (a.isDeletable === false) return -1;
-      if (b.isDeletable === false) return 1;
+      if (a.is_deletable === false) return -1;
+      if (b.is_deletable === false) return 1;
 
-      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
     });
   }, [goals]);
 
@@ -265,8 +290,8 @@ const SavingsGoals: React.FC<SavingsGoalsProps> = ({ goals, onUpdateGoals, onUpd
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {sortedGoals.map(goal => {
-            const hasTarget = goal.isDeletable !== false;
-            const progress = (hasTarget && goal.targetAmount > 0) ? Math.min((goal.currentAmount / goal.targetAmount) * 100, 100) : 100;
+            const hasTarget = goal.is_deletable !== false;
+            const progress = (hasTarget && goal.target_amount > 0) ? Math.min((goal.current_amount / goal.target_amount) * 100, 100) : 100;
             const isCompleted = hasTarget && progress >= 100;
             return (
               <div key={goal.id} className={`p-4 rounded-lg border flex flex-col ${isCompleted ? 'bg-green-900/30 border-green-500/50' : 'bg-gray-700/50 border-gray-600'}`}>
@@ -275,25 +300,25 @@ const SavingsGoals: React.FC<SavingsGoalsProps> = ({ goals, onUpdateGoals, onUpd
                         <span className="text-3xl">{goal.emoji}</span>
                         <div>
                             <p className={`font-bold text-lg ${isCompleted ? 'text-green-300' : 'text-white'}`}>{goal.name}</p>
-                            {hasTarget && <p className="text-xs text-gray-400">Target: {currencySymbol}{goal.targetAmount.toFixed(2)}</p>}
+                            {hasTarget && <p className="text-xs text-gray-400">Target: {currencySymbol}{goal.target_amount.toFixed(2)}</p>}
                         </div>
                     </div>
                      <div className="flex items-center gap-1">
                         <div className="relative group">
                             <button onClick={() => handleShowLog(goal)} className="p-1 text-gray-400 hover:text-white transition">
                                 <Bell size={14} />
-                                {goal.unreadNotificationMessage && (
+                                {goal.unread_notification_message && (
                                     <span className="absolute top-0 right-0 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-gray-700/50"></span>
                                 )}
                             </button>
-                             {goal.unreadNotificationMessage && (
+                             {goal.unread_notification_message && (
                                 <div className="absolute bottom-full mb-2 right-1/2 translate-x-1/2 w-60 p-2 bg-gray-900 border border-gray-600 rounded-lg text-xs text-center text-white opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                                    {goal.unreadNotificationMessage}
+                                    {goal.unread_notification_message}
                                     <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-gray-600"></div>
                                 </div>
                             )}
                         </div>
-                        {goal.isDeletable !== false && (
+                        {goal.is_deletable !== false && (
                           <>
                             <button onClick={() => openEditGoalModal(goal)} className="p-1 text-gray-400 hover:text-white transition"><Edit size={14} /></button>
                             {isCompleted ? (
@@ -312,13 +337,13 @@ const SavingsGoals: React.FC<SavingsGoalsProps> = ({ goals, onUpdateGoals, onUpd
                       <div className={`h-2.5 rounded-full ${isCompleted ? 'bg-green-500' : 'bg-indigo-500'}`} style={{ width: `${progress}%` }}></div>
                     </div>
                     <div className="text-sm flex justify-between text-gray-300 mb-4">
-                      <span>{currencySymbol}{goal.currentAmount.toFixed(2)}</span>
+                      <span>{currencySymbol}{goal.current_amount.toFixed(2)}</span>
                       <span>{progress.toFixed(0)}%</span>
                     </div>
                   </>
                 )}
                  {!hasTarget && (
-                    <p className="text-2xl font-bold text-white my-2">{currencySymbol}{goal.currentAmount.toFixed(2)}</p>
+                    <p className="text-2xl font-bold text-white my-2">{currencySymbol}{goal.current_amount.toFixed(2)}</p>
                  )}
                 
                 <div className="mt-auto">
@@ -330,7 +355,7 @@ const SavingsGoals: React.FC<SavingsGoalsProps> = ({ goals, onUpdateGoals, onUpd
                     <div className="grid grid-cols-2 gap-2">
                       <button 
                         onClick={() => { setWithdrawError(''); setIsWithdrawModalOpen(goal); }} 
-                        disabled={goal.currentAmount <= 0}
+                        disabled={goal.current_amount <= 0}
                         className="w-full flex items-center justify-center bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-3 rounded-lg transition text-sm disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed">
                         <ArrowDown size={16} className="mr-1"/> Withdraw
                       </button>
@@ -359,8 +384,8 @@ const SavingsGoals: React.FC<SavingsGoalsProps> = ({ goals, onUpdateGoals, onUpd
                     <div>
                         <label className="block text-sm font-medium text-gray-400">Target Amount ({currencySymbol})</label>
                         <input type="number" value={targetAmount} onChange={(e) => setTargetAmount(e.target.value)} placeholder="1000" min="1" step="0.01" required className="w-full mt-1 p-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
+                         {editError && <p className="text-xs text-red-400 mt-1">{editError}</p>}
                     </div>
-                     {editError && <p className="text-xs text-red-400 mt-1">{editError}</p>}
                     <div>
                         <label className="block text-sm font-medium text-gray-400 mb-2">Choose an Icon</label>
                         <div className="flex flex-wrap gap-2">
@@ -414,12 +439,12 @@ const SavingsGoals: React.FC<SavingsGoalsProps> = ({ goals, onUpdateGoals, onUpd
                             onChange={(e) => { setWithdrawAmount(e.target.value); setWithdrawError(''); }}
                             placeholder="20.00" 
                             min="0.01" 
-                            max={isWithdrawModalOpen.currentAmount}
+                            max={isWithdrawModalOpen.current_amount}
                             step="0.01" 
                             autoFocus 
                             required 
                             className={`w-full mt-1 p-2 bg-gray-700 border rounded-md text-white focus:ring-2 focus:border-indigo-500 text-lg ${withdrawError ? 'border-red-500 ring-red-500' : 'border-gray-600 focus:ring-indigo-500'}`} />
-                         <p className="text-xs text-gray-500 mt-1">Available: {currencySymbol}{isWithdrawModalOpen.currentAmount.toFixed(2)}</p>
+                         <p className="text-xs text-gray-500 mt-1">Available: {currencySymbol}{isWithdrawModalOpen.current_amount.toFixed(2)}</p>
                          {withdrawError && <p className="text-xs text-red-400 mt-1">{withdrawError}</p>}
                     </div>
                      <p className="text-xs text-gray-500 pt-1">This will be recorded as income under 'Savings Withdrawal' and added to your main balance.</p>

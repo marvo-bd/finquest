@@ -3,12 +3,10 @@ import { Canvas, useFrame, extend } from '@react-three/fiber';
 import { Sphere, Box } from '@react-three/drei';
 import * as THREE from 'three';
 
-// Fix: The `extend` function is used to make THREE.js classes available as JSX
-// components. This was extended to include all necessary primitives used in the file,
-// such as lights, to resolve TypeScript errors about missing properties on JSX.IntrinsicElements.
+// Fix: Extending the entire THREE namespace was causing a type error due to non-constructor exports.
+// This has been changed to a selective extend, including only the THREE components used as JSX elements in this file.
 extend({
   Group: THREE.Group,
-  Mesh: THREE.Mesh,
   MeshStandardMaterial: THREE.MeshStandardMaterial,
   AmbientLight: THREE.AmbientLight,
   DirectionalLight: THREE.DirectionalLight,

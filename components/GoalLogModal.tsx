@@ -12,7 +12,7 @@ interface GoalLogModalProps {
 const GoalLogModal: React.FC<GoalLogModalProps> = ({ goal, transactions, onClose, currencySymbol }) => {
   const goalTransactions = useMemo(() => {
     return transactions
-      .filter(t => t.goalId === goal.id)
+      .filter(t => t.goal_id === goal.id)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [transactions, goal.id]);
 

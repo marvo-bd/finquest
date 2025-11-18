@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { PieChart, Pie, Cell, Legend, Tooltip } from 'recharts';
 import { Transaction, User } from '../types';
@@ -27,7 +26,6 @@ interface ReportGeneratorProps {
   activityLog: string[];
   largestIncome: Transaction;
   largestExpense: Transaction;
-  mostFrequentCategory: string;
 }
 
 const ReportGenerator: React.FC<ReportGeneratorProps> = ({ 
@@ -44,14 +42,15 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
   activityLog,
   largestIncome,
   largestExpense,
-  mostFrequentCategory,
 }) => {
   const reportRef = useRef<HTMLDivElement>(null);
   const [aiSummary, setAiSummary] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(true);
+  const generationInitiated = useRef(false);
   const currencySymbol = CURRENCY_SYMBOLS[user.settings?.currency || 'USD'];
 
   const pieChartData = categoryData.filter(item => item.value > 0);
+  const tableCategoryData = useMemo(() => categoryData.filter(item => item.value > 0), [categoryData]);
 
   // Streak calculation logic, adapted from HabitTracker
   const streaks = useMemo(() => {
@@ -73,6 +72,11 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
   }, [activityLog]);
 
   useEffect(() => {
+    if (generationInitiated.current) {
+      return;
+    }
+    generationInitiated.current = true;
+
     const generatePdf = async () => {
       if (!reportRef.current) { onGenerated(); return; }
       
@@ -129,10 +133,10 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
             <h2 className="text-xl font-semibold text-indigo-700">FinQuest AI</h2>
         </header>
 
-        <div className="border-b-2 border-gray-200 mt-2 mb-4"></div>
+        <div className="border-b-2 border-gray-200 mt-2 mb-6"></div>
 
         <section className="flex items-center gap-4 mb-6">
-            <img src={user.imageUrl} alt="user" className="w-16 h-16 rounded-full border-2 border-indigo-200" crossOrigin="anonymous"/>
+            <img src={user.image_url} alt="user" className="w-16 h-16 rounded-full border-2 border-indigo-200" crossOrigin="anonymous"/>
             <div className="flex flex-col justify-center">
                 <p className="font-bold text-lg text-gray-700">{user.name} <span className="font-normal text-sm text-gray-500">({user.email})</span></p>
                 <p className="text-sm text-gray-500"><strong>Report for period:</strong> {periodTitle}</p>
@@ -141,15 +145,15 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
         </section>
 
         <section className="grid grid-cols-3 gap-4 mb-6 text-center">
-            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+            <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
                 <h3 className="font-bold text-green-800 text-sm">Total Income</h3>
                 <p className="text-2xl font-bold text-green-600">{currencySymbol}{totalIncome.toFixed(2)}</p>
             </div>
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+            <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
                 <h3 className="font-bold text-red-800 text-sm">Total Expense</h3>
                 <p className="text-2xl font-bold text-red-600">{currencySymbol}{totalExpense.toFixed(2)}</p>
             </div>
-            <div className={`p-3 rounded-lg border ${balance >= 0 ? 'bg-blue-50 border-blue-200' : 'bg-orange-50 border-orange-200'}`}>
+            <div className={`p-4 rounded-lg border ${balance >= 0 ? 'bg-blue-50 border-blue-200' : 'bg-orange-50 border-orange-200'}`}>
                 <h3 className={`font-bold text-sm ${balance >= 0 ? 'text-blue-800' : 'text-orange-800'}`}>Net Balance</h3>
                 <p className={`text-2xl font-bold ${balance >= 0 ? 'text-blue-600' : 'text-orange-600'}`}>{currencySymbol}{balance.toFixed(2)}</p>
             </div>
@@ -158,21 +162,21 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
         <section className="mb-6">
             <h2 className="text-xl font-semibold mb-2 text-gray-800 border-b pb-1">Expense Breakdown</h2>
             {pieChartData.length > 0 ? (
-              <div className="flex flex-row items-center mt-2 gap-4">
-                <div style={{ width: '300px', height: '250px' }}>
-                  <PieChart width={300} height={250}>
+              <div className="flex flex-row items-center mt-4 gap-4">
+                <div style={{ width: '300px', height: '300px' }}>
+                  <PieChart width={300} height={300}>
                     <Pie data={pieChartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} fill="#8884d8" label isAnimationActive={false}>
                       {pieChartData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
                     </Pie>
                     <Tooltip formatter={(value: number) => `${currencySymbol}${value.toFixed(2)}`} />
-                    <Legend wrapperStyle={{fontSize: "11px"}}/>
+                    <Legend wrapperStyle={{fontSize: "12px"}}/>
                   </PieChart>
                 </div>
                 <div className="flex-grow pl-4">
-                  <table className="w-full text-xs text-left">
+                  <table className="w-full text-sm text-left">
                     <thead><tr className="bg-gray-100"><th className="p-2 font-semibold text-black">Category</th><th className="p-2 font-semibold text-black">Amount</th><th className="p-2 font-semibold text-black text-right">% of Total</th></tr></thead>
                     <tbody className="text-gray-700">
-                      {categoryData.map(item => (
+                      {tableCategoryData.map(item => (
                         <tr key={item.name} className="border-b">
                           <td className="p-2">{item.name}</td>
                           <td className="p-2">{currencySymbol}{item.value.toFixed(2)}</td>
@@ -206,24 +210,18 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
                     <p className="font-bold text-green-700">Largest Income</p>
                     <p>{largestIncome.amount > 0 ? `${largestIncome.category}: ${currencySymbol}${largestIncome.amount.toFixed(2)}` : 'N/A'}</p>
                   </div>
-                  <div className="p-2 bg-blue-50 rounded border border-blue-100">
-                    <p className="font-bold text-blue-700">Most Frequent Spending</p>
-                    <p>{mostFrequentCategory}</p>
-                  </div>
                 </div>
             </div>
         </section>
         
-        <section className="my-4 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
+        <section className="p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
             <h2 className="text-xl font-semibold text-indigo-700 mb-2">Fin's Thoughts</h2>
             <p className="text-gray-700 text-sm">
               {isAiLoading ? 'Generating personalized insights...' : aiSummary}
             </p>
         </section>
 
-        <div className="flex-grow"></div>
-        
-        <footer className="text-center text-xs text-gray-400 mt-6 pt-2 border-t">
+        <footer className="text-center text-xs text-gray-400 mt-auto pt-4 border-t">
           <p>This report was generated by FinQuest AI. Total transactions in this period: {transactions.length}.</p>
           <p>&copy; {new Date().getFullYear()} FinQuest AI. All rights reserved.</p>
         </footer>

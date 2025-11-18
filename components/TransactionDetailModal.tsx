@@ -11,9 +11,9 @@ interface TransactionDetailModalProps {
 }
 
 const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({ transaction, onClose, onDelete, onEdit, currencySymbol }) => {
-  const { type, category, amount, date, description, savingsMeta, isValid, invalidationReason } = transaction;
-  const isSavingsTransaction = !!savingsMeta;
-  const isValidTransaction = isValid !== false; // Treat undefined as true
+  const { type, category, amount, date, description, savings_meta, is_valid, invalidation_reason } = transaction;
+  const isSavingsTransaction = !!savings_meta;
+  const isValidTransaction = is_valid !== false; // Treat undefined as true
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-50 backdrop-blur-sm" onClick={onClose}>
@@ -57,7 +57,7 @@ const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({ transac
               <div className="grid grid-cols-3 gap-2 text-center">
                 <div>
                   <p className="text-sm text-gray-400">Previous Balance</p>
-                  <p className="font-mono">{currencySymbol}{savingsMeta.previousAmount.toFixed(2)}</p>
+                  <p className="font-mono">{currencySymbol}{savings_meta.previousAmount.toFixed(2)}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-400">{type === TransactionType.INCOME ? 'Withdrew' : 'Deposited'}</p>
@@ -65,7 +65,7 @@ const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({ transac
                 </div>
                 <div>
                   <p className="text-sm text-gray-400">New Balance</p>
-                  <p className="font-mono">{currencySymbol}{savingsMeta.currentAmount.toFixed(2)}</p>
+                  <p className="font-mono">{currencySymbol}{savings_meta.currentAmount.toFixed(2)}</p>
                 </div>
               </div>
             </div>
@@ -84,7 +84,7 @@ const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({ transac
                         ? "Hey there! This transaction looks perfect and fits right into your financial quest log. Keep up the great work!"
                         : `Whoops! It looks like this part of your quest log is out of sync, probably because a previous entry was removed. This transaction is now invalid. Deleting it will help fix your timeline!`
                     }
-                     {invalidationReason && <p className="text-xs text-gray-400 mt-2 font-mono">{invalidationReason}</p>}
+                     {invalidation_reason && <p className="text-xs text-gray-400 mt-2 font-mono">{invalidation_reason}</p>}
                 </div>
             </div>
           </div>

@@ -41,41 +41,75 @@ const TourGuide: React.FC<TourGuideProps> = ({ steps, currentStep, onNext, onFin
         const targetRect = targetElement.getBoundingClientRect();
         const tooltipRect = tooltipElement.getBoundingClientRect();
         const PADDING = 16; // 1rem padding from viewport edges
+        const GUTTER = 10;
+        const isMobile = window.innerWidth < 640;
+
+        let newPosition: React.CSSProperties = {};
+        let newArrowPosition: React.CSSProperties = {};
 
         // --- VERTICAL POSITIONING ---
         const spaceBelow = window.innerHeight - targetRect.bottom;
         const spaceAbove = targetRect.top;
-        let newPosition: React.CSSProperties = {};
-        let newArrowPosition: React.CSSProperties = {};
+        let top;
 
-        if (spaceBelow > tooltipRect.height + PADDING) {
-          // Place below the target
-          newPosition.top = `${targetRect.bottom + 10}px`;
-          newArrowPosition = { bottom: '100%', borderBottomColor: '#2d3748' }; // bg-gray-800
+        // Default to placing below unless there isn't enough space AND there's more space above.
+        if (spaceBelow < tooltipRect.height + PADDING && spaceAbove > spaceBelow) {
+            // Place ABOVE
+            top = targetRect.top - tooltipRect.height - GUTTER;
+            newArrowPosition = { top: '100%', borderTopColor: '#2d3748' };
         } else {
-          // Place above the target
-          newPosition.bottom = `${window.innerHeight - targetRect.top + 10}px`;
-          newArrowPosition = { top: '100%', borderTopColor: '#2d3748' };
+            // Place BELOW
+            top = targetRect.bottom + GUTTER;
+            newArrowPosition = { bottom: '100%', borderBottomColor: '#2d3748' }; // bg-gray-800
         }
+
+        // Clamp the final position to stay within the viewport
+        newPosition.top = Math.max(PADDING, Math.min(top, window.innerHeight - tooltipRect.height - PADDING));
+
 
         // --- HORIZONTAL POSITIONING & CLAMPING ---
-        let tooltipLeft = targetRect.left + targetRect.width / 2;
+        if (isMobile) {
+            // Center the tooltip horizontally on mobile for a cleaner look.
+            newPosition.left = '50%';
+            newPosition.transform = 'translateX(-50%)';
+
+            // --- ARROW POSITIONING (Mobile) ---
+            const tooltipLeftWhenCentered = (window.innerWidth - tooltipRect.width) / 2;
+            const targetCenter = targetRect.left + targetRect.width / 2;
+            const arrowLeft = targetCenter - tooltipLeftWhenCentered;
+            newArrowPosition.left = `${arrowLeft}px`;
+
+        } else {
+            // Use the original desktop logic
+            let tooltipCenter = targetRect.left + targetRect.width / 2;
+            
+            // Clamp tooltip center to viewport
+            if (tooltipCenter - tooltipRect.width / 2 < PADDING) {
+                tooltipCenter = tooltipRect.width / 2 + PADDING;
+            }
+            if (tooltipCenter + tooltipRect.width / 2 > window.innerWidth - PADDING) {
+                tooltipCenter = window.innerWidth - tooltipRect.width / 2 - PADDING;
+            }
+            newPosition.left = `${tooltipCenter}px`;
+            newPosition.transform = 'translateX(-50%)';
+
+            // --- ARROW POSITIONING (Desktop) ---
+            // Calculate where the target's center is relative to the clamped tooltip's left edge
+            const targetCenter = targetRect.left + targetRect.width / 2;
+            const arrowLeft = targetCenter - (tooltipCenter - tooltipRect.width / 2);
+            newArrowPosition.left = `${arrowLeft}px`;
+        }
         
-        // Clamp to viewport to prevent going off-screen
-        if (tooltipLeft - tooltipRect.width / 2 < PADDING) {
-            tooltipLeft = tooltipRect.width / 2 + PADDING;
+        // --- FINAL ARROW CLAMPING ---
+        // Clamp arrow position to be within the tooltip bounds to prevent it looking detached
+        const arrowClampPadding = 12;
+        const currentArrowLeft = parseFloat(newArrowPosition.left as string);
+        if (currentArrowLeft < arrowClampPadding) {
+            newArrowPosition.left = `${arrowClampPadding}px`;
         }
-        if (tooltipLeft + tooltipRect.width / 2 > window.innerWidth - PADDING) {
-            tooltipLeft = window.innerWidth - tooltipRect.width / 2 - PADDING;
+        if (currentArrowLeft > tooltipRect.width - arrowClampPadding) {
+            newArrowPosition.left = `${tooltipRect.width - arrowClampPadding}px`;
         }
-
-        newPosition.left = `${tooltipLeft}px`;
-        newPosition.transform = 'translateX(-50%)';
-
-        // --- ARROW POSITIONING ---
-        // Calculate where the target's center is relative to the clamped tooltip's left edge
-        const targetCenterInTooltip = (targetRect.left + targetRect.width / 2) - (tooltipLeft - tooltipRect.width / 2);
-        newArrowPosition.left = `${targetCenterInTooltip}px`;
         newArrowPosition.transform = 'translateX(-50%)';
         
         setPosition({ ...newPosition, opacity: 1 });
@@ -111,7 +145,7 @@ const TourGuide: React.FC<TourGuideProps> = ({ steps, currentStep, onNext, onFin
       {/* Tooltip */}
       <div
         ref={tooltipRef}
-        className="fixed bg-gray-800 text-white p-5 rounded-lg shadow-2xl w-80 z-10 transition-opacity duration-300"
+        className="fixed bg-gray-800 text-white p-5 rounded-lg shadow-2xl w-[calc(100vw-2rem)] max-w-xs z-10 transition-opacity duration-300"
         style={position}
       >
         <div 
